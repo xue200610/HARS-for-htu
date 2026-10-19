@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录 · 医院挂号管理系统</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%231677ff'/><path d='M14 7h4v7h7v4h-7v7h-4v-7H7v-4h7z' fill='%23fff'/></svg>">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+
+<div class="auth-page">
+    <div class="auth-left">
+        <h1>医院挂号管理系统</h1>
+        <p>B/S 架构 · 在线挂号 / 分诊叫号 / 门诊管理<br>与桌面端共用同一套 hospital_db 数据</p>
+        <div class="feats">
+            <div><span>✓</span> 患者自助挂号，实时查看号源余量</div>
+            <div><span>✓</span> 医生工作站候诊队列与接诊叫号</div>
+            <div><span>✓</span> 管理端科室、医生、号源一体化维护</div>
+            <div><span>✓</span> 挂号量趋势与科室分布统计</div>
+        </div>
+    </div>
+
+    <div class="auth-right">
+        <div class="auth-form">
+            <h2>欢迎使用</h2>
+            <div class="tip">请登录，或注册一个新的患者账号</div>
+
+            <div class="tabs">
+                <button id="tab-login" class="active" type="button">登录</button>
+                <button id="tab-register" type="button">患者注册</button>
+            </div>
+
+            <!-- 登录 -->
+            <form id="form-login">
+                <label class="field">
+                    <span>登录角色</span>
+                    <select id="login-role">
+                        <option value="patient">患者</option>
+                        <option value="doctor">医生</option>
+                        <option value="admin">管理员</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>账号</span>
+                    <input id="login-username" value="patient1" autocomplete="username">
+                </label>
+                <label class="field">
+                    <span>密码</span>
+                    <input id="login-password" type="password" value="123456" autocomplete="current-password">
+                </label>
+                <button class="btn primary" type="submit" style="width:100%;justify-content:center;padding:10px">登 录</button>
+            </form>
+
+            <!-- 注册 -->
+            <form id="form-register" style="display:none">
+                <div class="grid-2">
+                    <label class="field"><span>姓名</span><input id="reg-name" placeholder="请输入真实姓名"></label>
+                    <label class="field"><span>性别</span>
+                        <select id="reg-gender"><option>男</option><option>女</option></select>
+                    </label>
+                </div>
+                <div class="grid-2">
+                    <label class="field"><span>年龄</span><input id="reg-age" type="number" min="0" max="130" placeholder="如 30"></label>
+                    <label class="field"><span>手机号</span><input id="reg-phone" placeholder="11 位手机号"></label>
+                </div>
+                <label class="field"><span>身份证号（可选）</span><input id="reg-idcard" placeholder="用于实名建档"></label>
+                <div class="grid-2">
+                    <label class="field"><span>登录账号</span><input id="reg-username" placeholder="字母/数字"></label>
+                    <label class="field"><span>登录密码</span><input id="reg-password" type="password" placeholder="至少 6 位"></label>
+                </div>
+                <button class="btn primary" type="submit" style="width:100%;justify-content:center;padding:10px">注册并登录</button>
+            </form>
+
+            <div class="demo-accounts">
+                <div style="margin-bottom:6px">演示账号（密码均为 <code>123456</code>，点一下自动填入）：</div>
+                <div>
+                    <code data-fill="admin|admin">admin</code>
+                    <code data-fill="doctor|doctor1">doctor1</code>
+                    <code data-fill="doctor|doctor2">doctor2</code>
+                    <code data-fill="patient|patient1">patient1</code>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="/assets/app.js"></script>
+<script>
+// 已登录直接进对应工作台
+if (Store.token && Store.user) location.replace(roleHome(Store.user.role));
+
+const formLogin = $('#form-login');
+const formRegister = $('#form-register');
+const tabLogin = $('#tab-login');
+const tabRegister = $('#tab-register');
+
+function switchTab(which) {
+    const isLogin = which === 'login';
+    tabLogin.classList.toggle('active', isLogin);
+    tabRegister.classList.toggle('active', !isLogin);
+    formLogin.style.display = isLogin ? '' : 'none';
+    formRegister.style.display = isLogin ? 'none' : '';
+}
+tabLogin.onclick = () => switchTab('login');
+tabRegister.onclick = () => switchTab('register');
+
+// 演示账号快速填充
+$$('[data-fill]').forEach(el => {
+    el.onclick = () => {
+        const [role, username] = el.dataset.fill.split('|');
+        $('#login-role').value = role;
+        $('#login-username').value = username;
+        $('#login-password').value = '123456';
+        switchTab('login');
+        toast(`已填入 ${username}，点击登录即可`, 'info');
+    };
+});
+
+formLogin.onsubmit = async e => {
+    e.preventDefault();
+    const btn = formLogin.querySelector('button');
+    btn.disabled = true;
+    try {
+        const data = await api.post('/api/auth/login', {
+            username: $('#login-username').value.trim(),
+            password: $('#login-password').value,
+            role: $('#login-role').value
+        });
+        Store.save(data.token, data.user);
+        toast(`欢迎回来，${data.user.name}`, 'ok');
+        const next = qs('next');
+        setTimeout(() => location.href = next ? `/${next}.html` : roleHome(data.user.role), 400);
+    } catch (err) {
+        toast(err.message, 'err');
+        btn.disabled = false;
+    }
+};
+
+formRegister.onsubmit = async e => {
+    e.preventDefault();
+    const btn = formRegister.querySelector('button');
+    const password = $('#reg-password').value;
+    if (password.length < 6) return toast('密码至少 6 位', 'err');
+
+    btn.disabled = true;
+    try {
+        const data = await api.post('/api/auth/register', {
+            username: $('#reg-username').value.trim(),
+            password,
+            name: $('#reg-name').value.trim(),
+            gender: $('#reg-gender').value,
+            age: $('#reg-age').value,
+            phone: $('#reg-phone').value.trim(),
+            id_card: $('#reg-idcard').value.trim()
+        });
+        Store.save(data.token, data.user);
+        toast('注册成功，正在进入挂号页面', 'ok');
+        setTimeout(() => location.href = '/patient.html', 600);
+    } catch (err) {
+        toast(err.message, 'err');
+        btn.disabled = false;
+    }
+};
+</script>
+</body>
+</html>

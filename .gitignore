@@ -1,0 +1,46 @@
+# ===== 编译产物 =====
+build/
+*.o
+*.obj
+moc_*.cpp
+moc_*.h
+ui_*.h
+qrc_*.cpp
+Makefile
+Makefile.Debug
+Makefile.Release
+object_script.*
+.qmake.stash
+*.exe
+*.dll
+*.a
+*.so
+
+# ===== 编辑器 / IDE =====
+.qtcreator/
+*.pro.user
+*.pro.user.*
+*.autosave
+.vscode/
+.idea/
+
+# ===== 数据库备份（开发快照，不入库）=====
+sql/backup/
+
+# ===== 系统 / 临时 =====
+Thumbs.db
+.DS_Store
+*.log
+*.tmp
+# ===== C++ 通用（补充）=====
+*.d
+*.pdb
+*.ilk
+*.gch
+*.pch
+*.lib
+*.lo
+*.slo
+
+# ===== 本地数据库密码（绝不能提交）=====
+db.env

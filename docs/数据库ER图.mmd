@@ -1,0 +1,126 @@
+erDiagram
+    departments {
+        int id PK
+        varchar name UK
+        varchar director
+        int doctor_count
+        int nurse_count
+        int bed_count
+    }
+    doctors {
+        int id PK
+        varchar name
+        varchar dept
+        varchar title
+        varchar phone
+    }
+    schedules {
+        int id PK
+        int doctor_id FK
+        varchar doctor
+        varchar dept
+        date work_date
+        varchar period
+        varchar start_time
+        varchar end_time
+        varchar room
+        varchar source_type
+        decimal price
+        int total_quota
+        int booked
+        varchar status
+    }
+    drugs {
+        int id PK
+        varchar code UK
+        varchar name
+        varchar spec
+        varchar unit
+        int stock
+        decimal price
+        varchar warn
+        int warn_stock
+    }
+    users {
+        int id PK
+        varchar username UK
+        varchar password
+        varchar role
+        varchar name
+        varchar phone
+        varchar id_card
+        varchar dept
+        int patient_id FK
+    }
+    patients {
+        int id PK
+        varchar name
+        varchar gender
+        int age
+        varchar id_card UK
+        varchar phone
+        varchar dept
+        varchar doctor
+        varchar diagnosis
+        varchar status
+    }
+    appointments {
+        int id PK
+        int patient_id FK
+        varchar patient_name
+        varchar dept
+        varchar doctor
+        varchar source_type
+        varchar appt_time
+        varchar status
+        int schedule_id FK
+        varchar room
+        decimal price
+        int queue_no
+        varchar phone
+    }
+    medical_records {
+        int id PK
+        int patient_id FK
+        varchar patient_name
+        varchar doctor
+        varchar dept
+        varchar diagnosis
+        varchar treatment
+        varchar record_date
+    }
+    inpatient {
+        int id PK
+        varchar bed_no UK
+        varchar dept
+        varchar floor_name
+        int patient_id FK
+        varchar patient_name
+        varchar doctor
+        varchar admit_date
+        varchar diagnosis
+        varchar status
+    }
+    fees {
+        int id PK
+        int patient_id FK
+        varchar patient_name
+        varchar items
+        decimal amount
+        varchar pay_method
+        varchar status
+        varchar fee_time
+    }
+
+    patients ||--o{ appointments : "patient_id"
+    schedules ||--o{ appointments : "schedule_id"
+    doctors ||--o{ schedules : "doctor_id"
+    patients ||--o{ users : "patient_id"
+    patients ||--o{ medical_records : "patient_id"
+    patients ||--o{ inpatient : "patient_id"
+    patients ||--o{ fees : "patient_id"
+    departments ||--o{ doctors : "名称关联 dept"
+    departments ||--o{ schedules : "名称关联 dept"
+    doctors ||--o{ schedules : "名称关联 doctor"
+    patients ||--o{ appointments : "名称关联 patient_name"
+    patients ||--o{ fees : "名称关联 patient_name"

@@ -1,0 +1,9 @@
+# .bat 必须保持 CRLF + GBK，否则 cmd 会报"不是内部或外部命令"
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.pro text eol=crlf
+*.md  text eol=lf
+*.sql text eol=lf
+*.js  text eol=lf
+*.css text eol=lf
+*.html text eol=lf

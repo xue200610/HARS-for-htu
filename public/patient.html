@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>在线挂号 · 医院挂号管理系统</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%231677ff'/><path d='M14 7h4v7h7v4h-7v7h-4v-7H7v-4h7z' fill='%23fff'/></svg>">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+
+<div class="page">
+    <div class="stat-grid" id="my-stats"></div>
+
+    <div class="card">
+        <div class="card-head">
+            <h2>在线挂号 <span class="sub">按顺序选择科室 → 医生 → 日期 → 时段</span></h2>
+            <button class="btn sm" onclick="resetFlow()">重新选择</button>
+        </div>
+
+        <div class="steps">
+            <div class="step" id="step-1"><span class="no">1</span> 选择科室</div>
+            <div class="step" id="step-2"><span class="no">2</span> 选择医生</div>
+            <div class="step" id="step-3"><span class="no">3</span> 选择日期</div>
+            <div class="step" id="step-4"><span class="no">4</span> 选择时段</div>
+        </div>
+
+        <div id="panel-dept">
+            <div class="chips" id="dept-chips"><span class="empty">加载中...</span></div>
+        </div>
+
+        <div id="panel-doctor" style="display:none;margin-top:16px">
+            <div class="list-grid" id="doctor-list"></div>
+        </div>
+
+        <div id="panel-date" style="display:none;margin-top:16px">
+            <div class="chips" id="date-chips"></div>
+        </div>
+
+        <div id="panel-slot" style="display:none;margin-top:16px">
+            <div class="slot-grid" id="slot-grid"></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-head">
+            <h2>我的挂号</h2>
+            <div style="display:flex;gap:10px">
+                <select id="filter-status">
+                    <option value="">全部状态</option>
+                    <option value="待就诊">待就诊</option>
+                    <option value="候诊中">候诊中</option>
+                    <option value="已就诊">已就诊</option>
+                    <option value="已取消">已取消</option>
+                </select>
+                <button class="btn sm" onclick="loadMine()">刷新</button>
+            </div>
+        </div>
+        <div id="my-table"></div>
+    </div>
+</div>
+
+<script src="/assets/app.js"></script>
+<script>
+const user = requireRole('patient');
+mountNavbar('patient');
+
+const state = { dept: '', doctorId: null, doctorName: '', date: '', schedule: null, dates: [] };
+const deptParam = qs('dept');
+
+/* ---------- 步骤显示 ---------- */
+function setStep(n) {
+    [1, 2, 3, 4].forEach(i => {
+        const el = $('#step-' + i);
+        el.classList.toggle('active', i === n);
+        el.classList.toggle('done', i < n);
+    });
+}
+function show(panel, visible) { $(panel).style.display = visible ? '' : 'none'; }
+
+/* ---------- 我的挂号统计 ---------- */
+async function loadStats() {
+    try {
+        const rows = await api.get('/api/appointments');
+        const count = s => rows.filter(r => r.status === s).length;
+        $('#my-stats').innerHTML = `
+            <div class="stat"><div class="label">我的挂号总数</div><div class="value">${rows.length}<span class="unit">条</span></div></div>
+            <div class="stat orange"><div class="label">待就诊</div><div class="value">${count('待就诊')}<span class="unit">条</span></div></div>
+            <div class="stat teal"><div class="label">候诊中</div><div class="value">${count('候诊中')}<span class="unit">条</span></div></div>
+            <div class="stat green"><div class="label">已就诊</div><div class="value">${count('已就诊')}<span class="unit">条</span></div></div>`;
+    } catch (err) {
+        $('#my-stats').innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+    }
+}
+
+/* ---------- 步骤 1：科室 ---------- */
+async function loadDepts() {
+    try {
+        const list = await api.get('/api/departments');
+        $('#dept-chips').innerHTML = list.map(d =>
+            `<div class="chip" data-dept="${esc(d.name)}">${esc(d.name)}<small>${d.doctor_count} 位医生</small></div>`
+        ).join('') || '<span class="empty">暂无科室</span>';
+
+        $$('#dept-chips .chip').forEach(el => el.onclick = () => selectDept(el.dataset.dept));
+
+        if (deptParam && list.some(d => d.name === deptParam)) selectDept(deptParam);
+        else setStep(1);
+    } catch (err) {
+        $('#dept-chips').innerHTML = `<span class="empty">${esc(err.message)}</span>`;
+    }
+}
+
+function selectDept(dept) {
+    state.dept = dept;
+    state.doctorId = null; state.date = ''; state.schedule = null;
+    $$('#dept-chips .chip').forEach(el => el.classList.toggle('active', el.dataset.dept === dept));
+    show('#panel-doctor', true); show('#panel-date', false); show('#panel-slot', false);
+    setStep(2);
+    loadDoctors();
+}
+
+/* ---------- 步骤 2：医生 ---------- */
+async function loadDoctors() {
+    const box = $('#doctor-list');
+    box.innerHTML = '<div class="empty">加载中...</div>';
+    try {
+        const list = await api.get(`/api/doctors?dept=${encodeURIComponent(state.dept)}`);
+        box.innerHTML = list.map(d => `
+            <div class="doctor-card" data-id="${d.id}" data-name="${esc(d.name)}">
+                <div class="avatar">${esc(d.name.slice(0, 1))}</div>
+                <div style="flex:1;min-width:0">
+                    <div style="font-weight:600">${esc(d.name)} <span class="badge">${esc(d.title || '医师')}</span></div>
+                    <div style="color:var(--text-2);font-size:12.5px;margin-top:2px">
+                        未来 7 天余号 <b style="color:${d.remaining > 0 ? 'var(--green)' : 'var(--red)'}">${d.remaining}</b>
+                        · 电话 ${esc(d.phone || '-')}
+                    </div>
+                </div>
+            </div>`).join('') || '<div class="empty">该科室暂无医生</div>';
+
+        $$('#doctor-list .doctor-card').forEach(el => el.onclick = () => selectDoctor(el));
+    } catch (err) {
+        box.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+    }
+}
+
+function selectDoctor(el) {
+    state.doctorId = Number(el.dataset.id);
+    state.doctorName = el.dataset.name;
+    state.date = ''; state.schedule = null;
+    $$('#doctor-list .doctor-card').forEach(c => c.classList.toggle('active', c === el));
+    show('#panel-date', true); show('#panel-slot', false);
+    setStep(3);
+    loadDates();
+}
+
+/* ---------- 步骤 3：日期 ---------- */
+async function loadDates() {
+    const box = $('#date-chips');
+    box.innerHTML = '<span class="empty">加载中...</span>';
+    try {
+        const list = await api.get(`/api/schedules/dates?dept=${encodeURIComponent(state.dept)}&doctor_id=${state.doctorId}`);
+        state.dates = list;
+        if (!list.length) {
+            box.innerHTML = '<span class="empty">该医生近两周暂无排班</span>';
+            return;
+        }
+        const week = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+        box.innerHTML = list.map(d => {
+            const w = week[new Date(d.work_date + 'T00:00:00').getDay()];
+            return `<div class="chip" data-date="${d.work_date}">${d.work_date.slice(5)}
+                        <small>${w} · 余号 ${d.remaining}</small></div>`;
+        }).join('');
+        $$('#date-chips .chip').forEach(el => el.onclick = () => selectDate(el.dataset.date));
+    } catch (err) {
+        box.innerHTML = `<span class="empty">${esc(err.message)}</span>`;
+    }
+}
+
+function selectDate(date) {
+    state.date = date; state.schedule = null;
+    $$('#date-chips .chip').forEach(el => el.classList.toggle('active', el.dataset.date === date));
+    show('#panel-slot', true);
+    setStep(4);
+    loadSlots();
+}
+
+/* ---------- 步骤 4：号源 ---------- */
+async function loadSlots() {
+    const box = $('#slot-grid');
+    box.innerHTML = '<div class="empty">加载中...</div>';
+    try {
+        const list = await api.get(
+            `/api/schedules?dept=${encodeURIComponent(state.dept)}&doctor_id=${state.doctorId}&date=${state.date}`);
+        box.innerHTML = list.map(s => {
+            const full = Number(s.remaining) <= 0 || s.status !== '正常';
+            return `<div class="slot ${full ? 'full' : ''}" data-id="${s.id}">
+                <div class="row1">
+                    <span>${esc(s.period)} ${esc(s.start_time)}-${esc(s.end_time)}</span>
+                    <span class="badge ${s.source_type === '专家号' ? 'orange' : 'blue'}">${esc(s.source_type)}</span>
+                </div>
+                <div class="row2">${esc(s.room || '')} · 挂号费 ${money(s.price)}</div>
+                <div class="row2">
+                    余号 <span class="left ${Number(s.remaining) <= 0 ? 'none' : ''}">${s.remaining}</span>
+                    / ${s.total_quota}　${s.status !== '正常' ? '<span class="badge red">停诊</span>' : ''}
+                </div>
+            </div>`;
+        }).join('') || '<div class="empty">该日期暂无号源</div>';
+
+        $$('#slot-grid .slot:not(.full)').forEach(el => el.onclick = () => selectSlot(el, list));
+    } catch (err) {
+        box.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+    }
+}
+
+function selectSlot(el, list) {
+    const s = list.find(x => x.id === Number(el.dataset.id));
+    state.schedule = s;
+    $$('#slot-grid .slot').forEach(x => x.classList.toggle('active', x === el));
+    bookConfirm(s);
+}
+
+/* ---------- 提交挂号 ---------- */
+function bookConfirm(s) {
+    openModal({
+        title: '确认挂号信息',
+        confirmText: '确认挂号',
+        bodyHtml: `
+            <dl class="detail-list">
+                <dt>就诊人</dt><dd>${esc(user.name)}</dd>
+                <dt>科室</dt><dd>${esc(s.dept)}</dd>
+                <dt>医生</dt><dd>${esc(s.doctor)}</dd>
+                <dt>就诊时间</dt><dd>${esc(s.work_date)} ${esc(s.period)} ${esc(s.start_time)}-${esc(s.end_time)}</dd>
+                <dt>诊室</dt><dd>${esc(s.room || '以现场分诊为准')}</dd>
+                <dt>号别</dt><dd>${esc(s.source_type)}</dd>
+                <dt>挂号费</dt><dd><b style="color:var(--red)">${money(s.price)}</b></dd>
+            </dl>`,
+        onConfirm: async () => {
+            try {
+                const appt = await api.post('/api/appointments', { schedule_id: s.id });
+                state.schedule = null;
+                show('#panel-slot', false);
+                setStep(4);
+                openModal({
+                    title: '挂号成功',
+                    hideFooter: false,
+                    confirmText: '知道了',
+                    cancelText: '继续挂号',
+                    bodyHtml: `
+                        <div style="text-align:center;padding:6px 0 14px">
+                            <div style="font-size:40px;color:var(--green)">✓</div>
+                            <div style="font-size:15px;font-weight:600;margin-top:6px">挂号成功，请按时到院就诊</div>
+                        </div>
+                        <dl class="detail-list">
+                            <dt>就诊序号</dt><dd style="font-size:20px;color:var(--brand);font-weight:700">${appt.queue_no}</dd>
+                            <dt>科室 / 医生</dt><dd>${esc(appt.dept)} · ${esc(appt.doctor)}</dd>
+                            <dt>就诊时间</dt><dd>${esc(appt.appt_time)}</dd>
+                            <dt>诊室</dt><dd>${esc(appt.room || '-')}</dd>
+                            <dt>挂号费</dt><dd>${money(appt.price)}</dd>
+                        </dl>`,
+                    onConfirm: () => { resetFlow(); loadMine(); loadStats(); return true; }
+                });
+                loadMine();
+                loadStats();
+                return true;
+            } catch (err) {
+                toast(err.message, 'err');
+                return false;
+            }
+        }
+    });
+}
+
+function resetFlow() {
+    state.doctorId = null; state.date = ''; state.schedule = null;
+    show('#panel-doctor', false); show('#panel-date', false); show('#panel-slot', false);
+    $$('#dept-chips .chip').forEach(el => el.classList.toggle('active', el.dataset.dept === state.dept));
+    setStep(state.dept ? 2 : 1);
+    if (state.dept) { show('#panel-doctor', true); loadDoctors(); }
+}
+
+/* ---------- 我的挂号列表 ---------- */
+async function loadMine() {
+    const status = $('#filter-status').value;
+    const box = $('#my-table');
+    box.innerHTML = '<div class="empty">加载中...</div>';
+    try {
+        const rows = await api.get('/api/appointments' + (status ? `?status=${encodeURIComponent(status)}` : ''));
+        renderTable(box, {
+            empty: '还没有挂号记录，先在上面选一个号源吧',
+            columns: [
+                { title: '序号', render: r => r.queue_no ? `<b>${r.queue_no}</b>` : '-' },
+                { title: '科室', key: 'dept' },
+                { title: '医生', key: 'doctor' },
+                { title: '就诊时间', key: 'appt_time' },
+                { title: '诊室', render: r => esc(r.room || '-') },
+                { title: '号别', render: r => `<span class="badge ${r.source_type === '专家号' ? 'orange' : 'blue'}">${esc(r.source_type)}</span>` },
+                { title: '挂号费', render: r => money(r.price) },
+                { title: '状态', render: r => badge(r.status) }
+            ],
+            actions: r => {
+                const canCancel = ['待就诊', '候诊中'].includes(r.status);
+                const canQueue = r.status === '待就诊';
+                return `${canQueue ? `<button class="btn sm" onclick="doQueue(${r.id})">取号</button>` : ''}
+                        ${canCancel ? `<button class="btn sm danger" onclick="doCancel(${r.id})">取消</button>` : ''}
+                        ${!canCancel ? '<span class="muted">—</span>' : ''}`;
+            },
+            rows
+        });
+    } catch (err) {
+        box.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+    }
+}
+
+async function doQueue(id) {
+    try {
+        await api.post(`/api/appointments/${id}/queue`);
+        toast('取号成功，请到候诊区等待叫号', 'ok');
+        loadMine(); loadStats();
+    } catch (err) { toast(err.message, 'err'); }
+}
+
+async function doCancel(id) {
+    if (!await confirmBox('取消后号源会释放给其他患者，确定取消这个号吗？', { title: '取消挂号', confirmText: '确定取消', danger: true })) return;
+    try {
+        await api.post(`/api/appointments/${id}/cancel`);
+        toast('已取消挂号', 'ok');
+        loadMine(); loadStats();
+    } catch (err) { toast(err.message, 'err'); }
+}
+
+$('#filter-status').onchange = loadMine;
+
+loadDepts();
+loadMine();
+loadStats();
+</script>
+</body>
+</html>

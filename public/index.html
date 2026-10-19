@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>门户首页 · 医院挂号管理系统</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%231677ff'/><path d='M14 7h4v7h7v4h-7v7h-4v-7H7v-4h7z' fill='%23fff'/></svg>">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+
+<div class="page">
+    <div class="hero">
+        <h1>在线挂号，少排队</h1>
+        <p>选择科室与医生，查看近两周出诊号源，一键完成挂号；到院后取号候诊，医生工作站实时叫号接诊。</p>
+        <div class="actions" id="hero-actions"></div>
+    </div>
+
+    <div class="card">
+        <div class="card-head">
+            <h2>科室导航 <span class="sub">点击科室可直接进入挂号</span></h2>
+        </div>
+        <div class="list-grid" id="dept-list"><div class="empty">加载中...</div></div>
+    </div>
+
+    <div class="card">
+        <div class="card-head">
+            <h2>出诊医生 <span class="sub">含未来 7 天剩余号源</span></h2>
+            <select id="doctor-dept"><option value="">全部科室</option></select>
+        </div>
+        <div class="list-grid" id="doctor-list"><div class="empty">加载中...</div></div>
+    </div>
+
+    <div class="card">
+        <h2>就诊流程</h2>
+        <div class="grid-3">
+            <div class="dept-card">
+                <div class="name">① 在线挂号</div>
+                <div class="meta">登录患者账号，选科室 → 选医生 → 选日期时段，提交后生成挂号单与就诊序号。</div>
+            </div>
+            <div class="dept-card">
+                <div class="name">② 到院取号</div>
+                <div class="meta">在「我的挂号」里点「取号」，状态变为候诊中，医生工作站即可看到你的队列位置。</div>
+            </div>
+            <div class="dept-card">
+                <div class="name">③ 候诊就诊</div>
+                <div class="meta">按序号候诊，医生接诊后状态更新为已就诊，可在费用管理里结算。</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="/assets/app.js"></script>
+<script>
+mountNavbar('index');
+
+const user = Store.user;
+
+// 顶部按钮按登录角色变化
+const heroActions = $('#hero-actions');
+if (!user) {
+    heroActions.innerHTML = `
+        <a class="btn primary" href="/login.html?next=patient">立即挂号</a>
+        <a class="btn" href="/login.html">登录 / 注册</a>`;
+} else if (user.role === 'patient') {
+    heroActions.innerHTML = `<a class="btn primary" href="/patient.html">去挂号</a>
+                             <a class="btn" href="/patient.html">我的挂号记录</a>`;
+} else {
+    heroActions.innerHTML = `<a class="btn primary" href="${roleHome(user.role)}">进入${roleName(user.role)}工作台</a>`;
+}
+
+function goBook(dept) {
+    const target = user?.role === 'patient'
+        ? `/patient.html?dept=${encodeURIComponent(dept)}`
+        : `/login.html?next=patient`;
+    location.href = target;
+}
+
+async function loadDepartments() {
+    const box = $('#dept-list');
+    try {
+        const list = await api.get('/api/departments');
+        const select = $('#doctor-dept');
+        select.innerHTML = '<option value="">全部科室</option>'
+            + list.map(d => `<option value="${esc(d.name)}">${esc(d.name)}</option>`).join('');
+
+        box.innerHTML = list.map(d => `
+            <div class="dept-card" data-dept="${esc(d.name)}" style="cursor:pointer">
+                <div class="name">${esc(d.name)} <span class="badge blue">${d.doctor_count} 位医生</span></div>
+                <div class="meta">主任：${esc(d.director || '待定')} · 床位 ${d.bed_count} · 未来号源 ${d.schedule_count} 个时段</div>
+            </div>`).join('') || '<div class="empty">暂无科室</div>';
+
+        $$('.dept-card[data-dept]').forEach(el => el.onclick = () => goBook(el.dataset.dept));
+    } catch (err) {
+        box.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+    }
+}
+
+async function loadDoctors(dept = '') {
+    const box = $('#doctor-list');
+    box.innerHTML = '<div class="empty">加载中...</div>';
+    try {
+        const list = await api.get('/api/doctors' + (dept ? `?dept=${encodeURIComponent(dept)}` : ''));
+        box.innerHTML = list.map(d => `
+            <div class="doctor-card" data-dept="${esc(d.dept)}">
+                <div class="avatar">${esc(d.name.slice(0, 1))}</div>
+                <div style="flex:1;min-width:0">
+                    <div style="font-weight:600">${esc(d.name)} <span class="badge">${esc(d.title || '医师')}</span></div>
+                    <div style="color:var(--text-2);font-size:12.5px;margin-top:2px">
+                        ${esc(d.dept)} · 未来 7 天余号
+                        <b style="color:${d.remaining > 0 ? 'var(--green)' : 'var(--red)'}">${d.remaining}</b>
+                    </div>
+                </div>
+                <button class="btn sm primary">挂号</button>
+            </div>`).join('') || '<div class="empty">该科室暂无医生</div>';
+
+        $$('.doctor-card').forEach(el => el.onclick = () => goBook(el.dataset.dept));
+    } catch (err) {
+        box.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+    }
+}
+
+$('#doctor-dept').onchange = e => loadDoctors(e.target.value);
+
+loadDepartments();
+loadDoctors();
+</script>
+</body>
+</html>

@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>医生工作站 · 医院挂号管理系统</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%231677ff'/><path d='M14 7h4v7h7v4h-7v7h-4v-7H7v-4h7z' fill='%23fff'/></svg>">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+
+<div class="page">
+    <div class="stat-grid" id="stats"></div>
+
+    <div class="card">
+        <div class="card-head">
+            <h2>候诊队列 <span class="sub" id="queue-sub"></span></h2>
+            <div class="toolbar" style="margin:0">
+                <select id="filter-date">
+                    <option value="">全部日期</option>
+                    <option value="today">今天</option>
+                </select>
+                <select id="filter-status">
+                    <option value="">全部状态</option>
+                    <option value="候诊中">候诊中</option>
+                    <option value="待就诊">待就诊</option>
+                    <option value="已就诊">已就诊</option>
+                    <option value="已取消">已取消</option>
+                </select>
+                <button class="btn sm" onclick="loadQueue()">刷新</button>
+            </div>
+        </div>
+        <div id="queue-table"></div>
+    </div>
+
+    <div class="card">
+        <div class="card-head">
+            <h2>我的排班 <span class="sub">未来 7 天号源与余号</span></h2>
+        </div>
+        <div id="schedule-table"></div>
+    </div>
+
+    <div class="card">
+        <div class="card-head">
+            <h2>我的患者 <span class="sub">可补充诊断信息</span></h2>
+            <input id="patient-keyword" placeholder="按姓名 / 手机号搜索" style="min-width:200px">
+        </div>
+        <div id="patient-table"></div>
+    </div>
+</div>
+
+<script src="/assets/app.js"></script>
+<script>
+const user = requireRole('doctor');
+mountNavbar('doctor');
+
+const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+/* ---------- 统计 ---------- */
+async function loadStats() {
+    try {
+        const d = await api.get('/api/stats/overview');
+        $('#stats').innerHTML = `
+            <div class="stat"><div class="label">今日挂号</div><div class="value">${d.today_appointments}<span class="unit">人</span></div></div>
+            <div class="stat orange"><div class="label">候诊中</div><div class="value">${d.queueing}<span class="unit">人</span></div></div>
+            <div class="stat teal"><div class="label">待就诊</div><div class="value">${d.waiting}<span class="unit">人</span></div></div>
+            <div class="stat green"><div class="label">今日已接诊</div><div class="value">${d.visited_today}<span class="unit">人</span></div></div>
+            <div class="stat"><div class="label">未来可用号源</div><div class="value">${d.remaining_quota}<span class="unit">个</span></div></div>
+            <div class="stat"><div class="label">我的患者档案</div><div class="value">${d.patients}<span class="unit">人</span></div></div>`;
+    } catch (err) {
+        $('#stats').innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+    }
+}
+
+/* ---------- 候诊队列 ---------- */
+async function loadQueue() {
+    const box = $('#queue-table');
+    box.innerHTML = '<div class="empty">加载中...</div>';
+    const params = new URLSearchParams({ scope: 'all' });
+    const date = $('#filter-date').value;
+    const status = $('#filter-status').value;
+    if (status) params.set('status', status);
+    if (date === 'today') params.set('date', todayStr());
+
+    try {
+        let rows = await api.get('/api/appointments?' + params.toString());
+        if (date === 'today') rows = rows.filter(r => String(r.appt_time).startsWith(todayStr()));
+        $('#queue-sub').textContent = `${user.name} · ${user.dept || ''} · 共 ${rows.length} 条`;
+        renderTable(box, {
+            empty: '暂无挂号记录',
+            columns: [
+                { title: '序号', render: r => r.queue_no ? `<b>${r.queue_no}</b>` : '-' },
+                { title: '患者', render: r => `${esc(r.patient_name || '-')}<div class="muted" style="font-size:12px">${esc(r.phone || '')}</div>` },
+                { title: '就诊时间', key: 'appt_time' },
+                { title: '号别', render: r => `<span class="badge ${r.source_type === '专家号' ? 'orange' : 'blue'}">${esc(r.source_type)}</span>` },
+                { title: '诊室', render: r => esc(r.room || '-') },
+                { title: '状态', render: r => badge(r.status) }
+            ],
+            actions: r => {
+                const canVisit = ['待就诊', '候诊中'].includes(r.status);
+                return `${canVisit ? `<button class="btn sm primary" onclick="doVisit(${r.id})">接诊完成</button>
+                                     <button class="btn sm danger" onclick="doCancel(${r.id})">停诊取消</button>`
+                                  : '<span class="muted">—</span>'}`;
+            },
+            rows
+        });
+    } catch (err) {
+        box.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+    }
+}
+
+async function doVisit(id) {
+    try {
+        await api.post(`/api/appointments/${id}/visit`);
+        toast('已标记为就诊完成', 'ok');
+        loadQueue(); loadStats();
+    } catch (err) { toast(err.message, 'err'); }
+}
+
+async function doCancel(id) {
+    if (!await confirmBox('确定取消该患者的挂号吗？号源会释放。', { title: '取消挂号', confirmText: '确定取消', danger: true })) return;
+    try {
+        await api.post(`/api/appointments/${id}/cancel`);
+        toast('已取消', 'ok');
+        loadQueue(); loadStats();
+    } catch (err) { toast(err.message, 'err'); }
+}
+
+/* ---------- 我的排班 ---------- */
+async function loadSchedules() {
+    const box = $('#schedule-table');
+    box.innerHTML = '<div class="empty">加载中...</div>';
+    try {
+        const all = await api.get('/api/schedules?days=7');
+        const rows = all.filter(s => s.doctor === user.name);
+        renderTable(box, {
+            empty: '未来 7 天暂无排班',
+            columns: [
+                {
+                    title: '日期', render: s => {
+                        const w = WEEK[new Date(s.work_date + 'T00:00:00').getDay()];
+                        return `${esc(s.work_date)} <span class="badge">${w}</span>`;
+                    }
+                },
+                { title: '时段', render: s => `${esc(s.period)} ${esc(s.start_time)}-${esc(s.end_time)}` },
+                { title: '号别', render: s => `<span class="badge ${s.source_type === '专家号' ? 'orange' : 'blue'}">${esc(s.source_type)}</span>` },
+                { title: '诊室', render: s => esc(s.room || '-') },
+                { title: '挂号费', render: s => money(s.price) },
+                { title: '已约 / 总号源', render: s => `${s.booked} / ${s.total_quota}` },
+                { title: '余号', render: s => `<b style="color:${s.remaining > 0 ? 'var(--green)' : 'var(--red)'}">${s.remaining}</b>` },
+                { title: '状态', render: s => badge(s.status) }
+            ],
+            rows
+        });
+    } catch (err) {
+        box.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+    }
+}
+
+/* ---------- 我的患者 ---------- */
+async function loadPatients() {
+    const box = $('#patient-table');
+    box.innerHTML = '<div class="empty">加载中...</div>';
+    const keyword = $('#patient-keyword').value.trim();
+    try {
+        const rows = await api.get('/api/patients' + (keyword ? `?keyword=${encodeURIComponent(keyword)}` : ''));
+        renderTable(box, {
+            empty: '暂无患者档案',
+            columns: [
+                { title: '姓名', key: 'name' },
+                { title: '性别', key: 'gender' },
+                { title: '年龄', render: p => p.age ?? '-' },
+                { title: '手机号', render: p => esc(p.phone || '-') },
+                { title: '科室', render: p => esc(p.dept || '-') },
+                { title: '诊断', render: p => esc(p.diagnosis || '待完善') },
+                { title: '状态', render: p => badge(p.status) },
+                { title: '挂号次数', key: 'appointment_count' },
+                { title: '最近就诊', render: p => esc(p.last_appt_time || '-') }
+            ],
+            actions: p => `<button class="btn sm" onclick='editDiagnosis(${JSON.stringify(p)})'>写诊断</button>`,
+            rows
+        });
+    } catch (err) {
+        box.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+    }
+}
+
+function editDiagnosis(p) {
+    formModal({
+        title: `填写诊断 — ${p.name}`,
+        fields: [
+            { name: 'diagnosis', label: '诊断结果', value: p.diagnosis || '', required: true, placeholder: '如：上呼吸道感染' },
+            { name: 'status', label: '就诊状态', type: 'select', value: p.status || '门诊', options: ['门诊', '住院', '出院'] }
+        ],
+        onSubmit: async data => {
+            await api.put(`/api/patients/${p.id}`, data);
+            toast('已保存诊断', 'ok');
+            loadPatients();
+        }
+    });
+}
+
+$('#filter-date').onchange = loadQueue;
+$('#filter-status').onchange = loadQueue;
+$('#patient-keyword').oninput = (() => {
+    let timer;
+    return () => { clearTimeout(timer); timer = setTimeout(loadPatients, 300); };
+})();
+
+loadStats();
+loadQueue();
+loadSchedules();
+loadPatients();
+</script>
+</body>
+</html>
