@@ -13,16 +13,15 @@ cd /d "%~dp0"
 rem ============ 数据库配置 ============
 rem  真实密码放在同目录的 db.env 里（该文件不进 Git）。
 rem  第一次使用：把 db.env.example 复制成 db.env，填上你的 MySQL 密码。
-if exist "%~dp0db.env" (
-  call "%~dp0db.env"
-) else (
+if not exist "%~dp0db.env" (
   echo.
-  echo [提示] 没有找到 db.env —— 数据库密码是空的，服务连不上数据库。
+  echo [提示] 没有找到 db.env，无法连接数据库。
   echo        请把 db.env.example 复制成 db.env，填入你的 MySQL 密码后重试。
   echo.
   pause
   goto :eof
 )
+for /f "usebackq eol=# tokens=1,* delims==" %%a in ("%~dp0db.env") do set "%%a=%%b"
 rem ====================================
 set "PATH=D:\Mysoftware\Qt\6.12.0\mingw_64\bin;D:\Mysoftware\Qt\Tools\mingw1310_64\bin;%PATH%"
 set "EXE=%~dp0build\HARS.exe"
